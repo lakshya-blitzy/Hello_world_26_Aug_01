@@ -1,9 +1,13 @@
 # Hello_world_26_Aug_01
 
 A minimal fixed-response HTTP server in a single file. `server.js` binds a
-listener to `127.0.0.1:3000` and answers every request it receives with the
-same 14-byte plain-text body — `Hello, World!` followed by a newline. There
-is nothing to install, nothing to build, and nothing to configure.
+listener to `127.0.0.1:3000` and, for every request event delivered to its
+request listener, selects the same response: status `200`, media type
+`text/plain`, and a 14-byte plain-text body — `Hello, World!` followed by a
+newline. Node.js frames that response on the wire and may suppress the
+body, notably for a `HEAD` request; the HTTP Contract section documents
+those cases. There is nothing to install, nothing to build, and nothing to
+configure.
 
 ## Overview
 
@@ -76,8 +80,9 @@ Hello, World!
 
 ## How It Works
 
-Each block below is quoted from `server.js` itself, in the order the file
-is read.
+Each block below is quoted exactly from `server.js`, as one contiguous
+region of the file, in the order the file is read. Where a region contains
+JSDoc or inline comments, they are quoted with it.
 
 **The dependency.** One built-in module is required, and it is the only
 dependency the program has [server.js:module]:
@@ -86,11 +91,25 @@ dependency the program has [server.js:module]:
 const http = require('http');
 ```
 
-**The two constants.** The bind address and the port are source literals
-[server.js:hostname] [server.js:port]:
+**The two constants.** The bind address and the port are source literals,
+each with its own `@constant` block [server.js:hostname] [server.js:port]:
 
 ```javascript
+/**
+ * Hardcoded loopback bind address. Binding here is what sets the
+ * reachability boundary: a client reaches the listener only by opening a
+ * connection to it from inside the listener's own network namespace.
+ * @constant {string}
+ * @default '127.0.0.1'
+ */
 const hostname = '127.0.0.1';
+/**
+ * Hardcoded TCP port, with no fallback. Nothing reads an environment
+ * variable, so if this port is already taken the program does not try
+ * another one.
+ * @constant {number}
+ * @default 3000
+ */
 const port = 3000;
 ```
 
@@ -103,17 +122,21 @@ document calls the request listener [server.js:requestListener]:
 
 ```javascript
 const server = http.createServer((req, res) => {
+  // Applies to every request the listener receives; `req` is never read.
   res.statusCode = 200;
+  // No `charset` parameter is set, so the client chooses the encoding.
   res.setHeader('Content-Type', 'text/plain');
+  // The body is 14 bytes, including the trailing newline.
   res.end('Hello, World!\n');
 });
 ```
 
-Three statements, in order. The status is set to `200`. The media type is
-set to `text/plain`, with no `charset` parameter, so the client chooses the
+Three statements, in order, each preceded in the source by the inline
+comment shown above it. The status is set to `200`. The media type is set
+to `text/plain`, with no `charset` parameter, so the client chooses the
 encoding. The response then ends with a 14-byte body — `Hello, World!` plus
-the trailing newline. `req` is never read, which is why the response does
-not vary with the request.
+the trailing newline. `req` is never read, which is why the application
+selects the same response whatever the request contains.
 
 **Binding and readiness.** `listen` receives the port and the host
 positionally, and its callback runs once the socket is bound, writing the
@@ -202,7 +225,10 @@ added by the `http` module:
 | `Connection`, `Keep-Alive` | the `http` module |
 
 **The catch-all, demonstrated.** A different method against a different
-path, carrying a request body, returns the identical response:
+path, carrying a request body, is answered with the same
+application-selected status, media type, and body. Only the module-added
+`Date` varies, and it varies with the moment of the request rather than
+with the request itself:
 
 ```bash
 curl -sS -X POST -d 'ignored=1' -D - 'http://127.0.0.1:3000/api/x?q=1'
@@ -244,8 +270,11 @@ the header is absent rather than zero — see §9.3.2 of
 some malformed or unusual requests itself, with statuses the application
 never sets, and which requests those are varies by Node.js version.
 
-**Documented absences.** Each header below is absent from every response,
-and each absence has a consequence for the client:
+**Documented absences.** Application code sets none of the headers below,
+and none appeared in any response observed for a request delivered to the
+request listener on Node.js 24.20.0 and 22.23.2. Each absence has a
+consequence for the client. Responses the `http` module generates on its
+own — the runtime-decided outcomes above — are outside this table:
 
 | Absent | Consequence for the client |
 | --- | --- |
@@ -254,7 +283,14 @@ and each absence has a consequence for the client:
 | `Cache-Control`, `ETag` | nothing directs or validates caching |
 | `Last-Modified` | no modification time is offered |
 | `Content-Encoding` | the body is never compressed |
-| CORS headers | no cross-origin access is granted |
+| CORS headers | browser scripts cannot read a cross-origin response |
+
+No `Content-Encoding` is sent even when the client offers encodings: a
+request advertising four of them drew a response carrying none, so the body
+is never compressed. The CORS absence is narrower than it looks — without
+those headers a browser script is not permitted to read a cross-origin
+response, while the request itself may still be sent, and a non-browser
+client such as `curl` is unaffected.
 
 ## Configuration
 
@@ -320,15 +356,18 @@ without a source change:
 | Check | `curl -s http://127.0.0.1:3000/` in that namespace |
 | Logs | The readiness line on stdout, nothing after it |
 | Restart and stop | `Ctrl-C`; a restart is a full process restart |
-| Not supported | Outside-namespace access; container bridge publish |
+| Not supported | Direct outside-namespace access; ordinary bridge publish |
 
 There is no install step, no build step, and no manifest to place beside
 the two files. The check returns the 14-byte body when it runs in the same
 network namespace as the process; from anywhere else the connection is
-refused. There is no reload and no graceful drain, because no signal
-handler is registered, so a restart is always a full process restart. Logs
-are one line on stdout at startup and nothing thereafter: no request log,
-no error log, and no log file.
+refused. Both unsupported cases are about direct paths: serving a client
+outside the namespace, including one arriving on a published container
+port, is what the in-namespace proxy or forwarder described above is for.
+There is no reload and no graceful drain, because no signal handler is
+registered, so a restart is always a full process restart. Logs are one
+line on stdout at startup and nothing thereafter: no request log, no error
+log, and no log file.
 
 **Running under supervision** imposes two requirements, and they are
 different things. The supervisor must run `node server.js` as its command,
@@ -420,6 +459,7 @@ node --check server.js
 It prints nothing and exits `0`. There are no tests to run.
 
 **Absences, stated plainly.** No tests and no test directory. No CI
-configuration. No dependencies, no manifest, and no lockfile. No database.
-No authentication. No environment configuration. The repository contains no
+configuration. No third-party dependencies, no manifest, and no lockfile —
+the only dependency is the built-in `http` module. No database. No
+authentication. No environment configuration. The repository contains no
 `LICENSE` file, so no licence terms are stated for this code.

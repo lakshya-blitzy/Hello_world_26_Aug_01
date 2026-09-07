@@ -1,9 +1,7 @@
 /**
- * Minimal fixed-response HTTP server in a single file: it answers every
- * request it receives with the same plain-text greeting. The file is
- * meaningful only as a process entry point - it exports nothing, so no
- * reusable API can be imported from it, and the built-in `http` module is
- * its only dependency.
+ * Minimal fixed-response HTTP server in one file: the request listener selects
+ * the same status, media type, and greeting per `request` event; Node sends
+ * no body for `HEAD`. A no-export entry point needing only built-in `http`.
  * @file
  * @module server
  */
@@ -57,5 +55,4 @@ const server = http.createServer((req, res) => {
 server.listen(port, hostname, () => {
   console.log(`Server running at http://${hostname}:${port}/`);
 });
-// No 'error' listener is registered, so a bind failure such as EADDRINUSE is
-// fatal: the event goes unhandled and the process exits with a stack trace.
+// No 'error' listener is registered, so a bind failure (EADDRINUSE) is fatal.
