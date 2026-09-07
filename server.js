@@ -1,3 +1,9 @@
+ * Minimal fixed-response HTTP server in one file: the request listener selects
+ * the same status, media type, and greeting per `request` event; Node sends
+ * no body for `HEAD`. A no-export entry point needing only built-in `http`.
+ * @file
+ * @module server
+ */
 const http = require('http');
 
 const hostname = '127.0.0.1';
