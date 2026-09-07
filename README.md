@@ -57,14 +57,17 @@ below use `curl` and a POSIX shell; a browser pointed at
 node server.js
 ```
 
-The process writes one line to stdout — the readiness line — and nothing
-else [server.js:onListening]:
+On a successful bind the process writes one line to stdout — the readiness
+line — and nothing else [server.js:onListening]:
 
 ```text
 Server running at http://127.0.0.1:3000/
 ```
 
-Nothing follows it: there is no request log.
+Nothing follows it on stdout: there is no request log. The process's
+stderr stays empty unless the bind fails, in which case Node.js writes a
+crash diagnostic there and the process exits — see Troubleshooting and
+Limitations.
 
 **Verify it.** From another shell in the same network namespace:
 
@@ -148,8 +151,11 @@ server.listen(port, hostname, () => {
 });
 ```
 
-No `'error'` listener is registered on the server, so a bind failure is not
-reported — it is fatal. See Troubleshooting and Limitations.
+No `'error'` listener is registered on the server, so application code
+never handles a bind failure: Node.js writes the unhandled `EADDRINUSE`
+error as a stack trace to the process's own stderr, and the process exits
+non-zero. That diagnostic is local process output, not an HTTP response —
+no client sees it. See Troubleshooting and Limitations.
 
 The lifecycle, including the request path:
 
@@ -354,7 +360,7 @@ without a source change:
 | Copy | The two tracked files to a directory on that host |
 | Launch | `node server.js` in the foreground |
 | Check | `curl -s http://127.0.0.1:3000/` in that namespace |
-| Logs | The readiness line on stdout, nothing after it |
+| Logs | Readiness line on stdout; bind crash on stderr |
 | Restart and stop | `Ctrl-C`; a restart is a full process restart |
 | Not supported | Direct outside-namespace access; ordinary bridge publish |
 
@@ -366,14 +372,21 @@ outside the namespace, including one arriving on a published container
 port, is what the in-namespace proxy or forwarder described above is for.
 There is no reload and no graceful drain, because no signal handler is
 registered, so a restart is always a full process restart. Logs are one
-line on stdout at startup and nothing thereafter: no request log, no error
-log, and no log file.
+line on stdout at startup and nothing thereafter: no request log, and no
+application-managed error logging or log file. The one exception is
+written by the runtime rather than by the application: a failure to bind
+sends an unhandled-error stack trace to stderr just before the process
+exits.
 
 **Running under supervision** imposes two requirements, and they are
 different things. The supervisor must run `node server.js` as its command,
-capture its stdout so the readiness line is visible, and restart the
-process on exit — the program performs no retry of its own and any exit is
-a full stop, so restart-on-exit with a backoff is the only sensible policy.
+capture its stdout so the readiness line is visible, capture its stderr
+separately from stdout so a bind-failure stack trace is not lost, and
+restart the process on exit — the program performs no retry of its own and
+any exit is a full stop, so restart-on-exit with a backoff is the only
+sensible policy. Access to the captured stderr has to be restricted: it
+carries a raw stack trace that discloses runtime-internal file paths, and
+it is local process output the request listener never sends to any client.
 Separately, whatever connects to the listener — a health check, a proxy, a
 forwarder — must run in the same network namespace as the process, because
 opening `127.0.0.1:3000` is what being served requires. A supervisor may
@@ -390,17 +403,23 @@ Every entry below was reproduced against the running program.
 
 **Port already in use.** A second instance in the same network namespace
 crashes. No `'error'` listener is registered on the server
-[server.js:onListening], so the error event goes unhandled and the second
-process exits non-zero with a stack trace instead of reporting the problem:
+[server.js:onListening], so application code never handles the event:
+Node.js writes the unhandled error as a stack trace to that process's own
+stderr, and the process exits non-zero. Nothing reaches its stdout, so the
+readiness line never appears. Look on stderr for the line that identifies
+the failure:
 
 ```text
 Error: listen EADDRINUSE: address already in use 127.0.0.1:3000
 ```
 
-Identify it by the `EADDRINUSE` code and that message; the numeric `errno`
+That output is a local process diagnostic, not an HTTP response: no client
+is involved, and the request listener never sends it anywhere. Identify
+the failure by the `EADDRINUSE` code and that message; the numeric `errno`
 printed alongside is platform detail. The stack trace also discloses
-runtime-internal file paths. Free port 3000 in that network namespace, or
-run the second copy in a network namespace of its own.
+runtime-internal file paths, so treat captured stderr as sensitive. Free
+port 3000 in that network namespace, or run the second copy in a network
+namespace of its own.
 
 **Connection refused.** The client could not open a loopback connection
 inside the listener's network namespace; requests to the host's routable
@@ -437,8 +456,8 @@ assuming what it was meant for:
 - Not container-ready under ordinary bridge publishing.
 - No reusable API and no exports, so no other module can import it.
 - None of the controls production operation requires: no configuration
-  surface, no error handling, no graceful shutdown, no logging beyond the
-  readiness line, and no tests.
+  surface, no error handling, no graceful shutdown, no application logging
+  beyond the readiness line, and no tests.
 
 ## Project Structure, Verification and Licence
 
