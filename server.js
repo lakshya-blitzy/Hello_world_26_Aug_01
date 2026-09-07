@@ -55,8 +55,4 @@ const server = http.createServer((req, res) => {
 server.listen(port, hostname, () => {
   console.log(`Server running at http://${hostname}:${port}/`);
 });
-// No 'error' listener is registered, so a bind failure (EADDRINUSE) is fatal.
-// If another process in this network namespace holds the address, the error
-// event goes unhandled and this one exits non-zero with no readiness line.
-// Node writes the raw error and its stack trace to stderr, and that trace
-// names runtime-internal file paths, so restrict who can read that output.
+// No 'error' listener is registered: EADDRINUSE is fatal; restrict stderr.

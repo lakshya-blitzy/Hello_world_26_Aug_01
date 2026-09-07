@@ -399,7 +399,11 @@ given here, and none exists in the repository.
 
 ## Troubleshooting and Limitations
 
-Every entry below was reproduced against the running program.
+The first three entries below were reproduced against the running program.
+The fourth is a runtime prerequisite: the command it shows was executed, but
+it observes the Node.js runtime rather than this program. The limitations
+that close this section are properties of the source and of the reachability
+model described under Deployment and Reachability.
 
 **Port already in use.** A second instance in the same network namespace
 crashes. No `'error'` listener is registered on the server
